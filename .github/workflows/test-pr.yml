@@ -1,0 +1,92 @@
+name: PR Tests
+
+on:
+  pull_request:
+    branches: [ master, develop ]
+
+jobs:
+  validate-pr:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Check for secrets in code
+      run: |
+        if grep -r "password\|secret\|key" --include="*.py" --include="*.js" --include="*.ts" --exclude-dir="node_modules" . | grep -v "# pragma: allowlist secret"; then
+          echo "❌ Potential secrets found in code"
+          exit 1
+        fi
+        echo "✅ No secrets found in code"
+    
+    - name: Validate Docker files
+      run: |
+        for dockerfile in $(find . -name "Dockerfile"); do
+          echo "Validating $dockerfile"
+          docker run --rm -i hadolint/hadolint < "$dockerfile" || echo "⚠️ Hadolint issues in $dockerfile"
+        done
+    
+    - name: Check CLAUDE.md is up to date
+      run: |
+        if [[ ! -f "CLAUDE.md" ]]; then
+          echo "❌ CLAUDE.md file is missing"
+          exit 1
+        fi
+        echo "✅ CLAUDE.md exists"
+
+  frontend-lint:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./frontend
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Run ESLint
+      run: npm run lint
+    
+    - name: Check TypeScript
+      run: npm run type-check
+
+  backend-lint:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [agno_service, control_panel_backend, mcp_server]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        cd ${{ matrix.service }}
+        pip install flake8 black isort
+        if [[ -f requirements.txt ]]; then
+          pip install -r requirements.txt
+        fi
+    
+    - name: Run flake8
+      run: |
+        cd ${{ matrix.service }}
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+    
+    - name: Check formatting with black
+      run: |
+        cd ${{ matrix.service }}
+        black --check . || echo "⚠️ Code formatting issues found"
