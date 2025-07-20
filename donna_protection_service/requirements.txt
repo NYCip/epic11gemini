@@ -1,0 +1,2 @@
+# Placeholder requirements
+fastapi==0.115.0
